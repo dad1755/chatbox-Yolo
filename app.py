@@ -5,6 +5,11 @@ from huggingface_hub import hf_hub_download
 from ultralytics import YOLO
 from supervision import Detections
 
+# Load the Google API key from secrets
+api_key = st.secrets["general"]["GOOGLE_API_KEY"]
+print(f"Loaded API key: {api_key}")  # Debugging line to verify if the API key is loaded
+
+
 # Load the YOLO model from Hugging Face
 def load_model():
     model_path = hf_hub_download(repo_id="arnabdhar/YOLOv8-Face-Detection", filename="model.pt")
@@ -66,8 +71,7 @@ def handle_user_query(user_query, api_key):
 if 'model' not in st.session_state:
     st.session_state.model = load_model()
 
-# Google Gemini API key from secrets
-api_key = st.secrets["GOOGLE_API_KEY"]
+
 
 # User-provided chat input
 if user_query := st.chat_input(placeholder="Enter your query here..."):
