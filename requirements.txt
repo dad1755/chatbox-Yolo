@@ -8,3 +8,4 @@ transformers
 torch
 google-generativeai
 python-dotenv
+genai
