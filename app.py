@@ -1,17 +1,9 @@
+import requests
 import streamlit as st
-import random
 from PIL import Image, ImageDraw
 from huggingface_hub import hf_hub_download
 from ultralytics import YOLO
 from supervision import Detections
-
-# Load the Google API key from secrets
-api_key = st.secrets["general"]["GOOGLE_API_KEY"]
-print(f"Loaded API key: {api_key}")  # Debugging line to verify if the API key is loaded
-
-# A simple document retrieval function
-def retrieve_documents(query, documents):
-    return random.choice(documents) if documents else "No documents available for retrieval."
 
 # Load the YOLO model from Hugging Face
 def load_model():
@@ -33,129 +25,69 @@ def draw_bounding_boxes(image, boxes):
         draw.rectangle([x1, y1, x2, y2], outline="red", width=2)  # Draw the rectangle
     return image
 
-# Centered title with responsive styling
-st.markdown("""
-    <style>
-        @media (max-width: 600px) {
-            h1 { font-size: 70px; line-height: 1.2; }
-            h3 { font-size: 16px; line-height: 1.1; }
-            .stTextInput > div > input {
-                font-size: 16px !important;
-                height: 48px !important;
-                width: 100% !important;
-            }
-        }
-        @media (min-width: 601px) {
-            h1 { font-size: 36px; line-height: 1; }
-            h3 { font-size: 24px; line-height: 0; }
-            .stTextInput > div > input {
-                font-size: 20px !important;
-                height: 56px !important;
-                width: 80% !important;
-            }
-        }
-        .stButton > button { padding: 10px 20px; }
-        .stFileUploader { margin-top: 20px; margin-bottom: 20px; }
-        /* Mobile specific container for query form */
-        .mobile-container {
-            max-width: 100% !important;
-        }
-    </style>
-    <h1 style='text-align: center; margin: 0;'>🦙💬 G10</h1>
-    <h3 style='text-align: center; margin: 0;'>Face Counter Apps</h3>
-""", unsafe_allow_html=True)
+# Function to call Google Gemini API for text generation
+def generate_gemini_response(user_query, api_key):
+    url = "https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generateText"
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    data = {
+        "prompt": {
+            "text": user_query
+        },
+        "temperature": 0.7,
+        "maxOutputTokens": 256
+    }
 
-# Initialize the documents list
-if 'documents' not in st.session_state:
-    st.session_state.documents = []
+    response = requests.post(url, headers=headers, json=data)
 
-# Load the YOLO model only once
+    if response.status_code == 200:
+        response_data = response.json()
+        return response_data["candidates"][0]["output"]
+    else:
+        st.error(f"Error {response.status_code}: Unable to generate response")
+        return None
+
+# Handle user query for text generation using Google Gemini API
+def handle_user_query(user_query, api_key):
+    if user_query:
+        st.write("Received Query: ", user_query)
+
+        # Generate content using the Google Gemini API
+        generated_text = generate_gemini_response(user_query, api_key)
+        if generated_text:
+            st.write("Model Response:")
+            st.write(generated_text)
+
+# Load models only once
 if 'model' not in st.session_state:
     st.session_state.model = load_model()
 
-# Store chat messages for the user query in the chatbox
-if "messages" not in st.session_state.keys():
-    st.session_state.messages = [{"role": "assistant", "content": "How may I assist you?"}]
+# Google Gemini API key from secrets
+api_key = st.secrets["GOOGLE_API_KEY"]
 
-# Display previous chat messages
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
-
-# Function to handle document retrieval and model response
-def handle_user_query(user_query):
-    if user_query:
-        if st.session_state.documents:
-            retrieved_document = retrieve_documents(user_query, st.session_state.documents)
-            st.write("Retrieved Document: Here are the extracted details:")
-            st.write(retrieved_document)
-
-        # Prepare to use the Gemini API
-        if api_key:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-
-            # Generate content using the Gemini model
-            response = model.generate_content(user_query)
-
-            # Handle the response
-            if response:
-                generated_text = response.text
-                st.write("Model Response:")
-                st.write(generated_text)
-            else:
-                st.warning("No response received from the Gemini model.")
-        else:
-            st.error("Google API key is missing. Check your secrets file.")
-
-        # Clear the documents after submission
-        st.session_state.documents.clear()
-    else:
-        st.error("Please enter a query before submitting.")
-
-# User-provided chat input for queries
+# User-provided chat input
 if user_query := st.chat_input(placeholder="Enter your query here..."):
-    st.session_state.messages.append({"role": "user", "content": user_query})
-    with st.chat_message("user"):
-        st.write(user_query)
+    st.write("Processing query: ", user_query)
+    handle_user_query(user_query, api_key)
 
-    with st.chat_message("assistant"):
-        with st.spinner("Analyzing and generating response..."):
-            handle_user_query(user_query)
+# Image upload for face detection
+uploaded_file = st.file_uploader("Upload an image (jpg/png)", type=["jpg", "jpeg", "png"])
 
-# Add a file uploader for document and image
-uploaded_file = st.file_uploader("Upload a document (text file) or image (jpg/png)", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
-
-# Process the uploaded file
 if uploaded_file is not None:
-    file_type = uploaded_file.type
-    # Handle text document upload
-    if file_type == "text/plain":
-        content = uploaded_file.read().decode("utf-8")
-        st.session_state.documents.append(content)
-        st.success("Document uploaded successfully!")
+    image = Image.open(uploaded_file)
 
-        # Analyze document
-        if st.button("Analyze Document"):
-            analysis_result = content  # For now, simply display the content
-            st.write("Analysis Result: Here is the content of the uploaded document:")
-            st.write(analysis_result)
+    # Detect faces
+    detected_faces = detect_faces(image, st.session_state.model)
+    boxes = detected_faces.xyxy
 
-    # Handle image file upload
-    elif file_type in ["image/jpeg", "image/png"]:
-        image = Image.open(uploaded_file)
-
-        # Automatically detect faces after uploading an image
-        detected_faces = detect_faces(image, st.session_state.model)
-        boxes = detected_faces.xyxy
-
-        # Check if any boxes (faces) are detected
-        if boxes is not None and len(boxes) > 0:
-            # Draw bounding boxes on the image
-            image_with_boxes = draw_bounding_boxes(image.copy(), boxes)
-            st.image(image_with_boxes, caption='Detected Faces', channels="RGB")
-
-            # Display the number of detected faces
-            st.write(f"Number of faces detected: {len(boxes)}")
-        else:
-            st.warning("No faces detected. Please try a different image.")
+    # Check if any faces are detected
+    if boxes is not None and len(boxes) > 0:
+        image_with_boxes = draw_bounding_boxes(image.copy(), boxes)
+        st.image(image_with_boxes, caption='Detected Faces', channels="RGB")
+        st.write(f"Number of faces detected: {len(boxes)}")
+    else:
+        st.warning("No faces detected. Please try a different image.")
